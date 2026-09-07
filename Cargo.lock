@@ -13,6 +13,7 @@ name = "constant-time-permutation"
 version = "1.0.0"
 dependencies = [
  "rand",
+ "siphasher",
 ]
 
 [[package]]
@@ -94,6 +95,12 @@ checksum = "76afc826de14238e6e8c374ddcc1fa19e374fd8dd986b0d2af0d02377261d83c"
 dependencies = [
  "getrandom",
 ]
+
+[[package]]
+name = "siphasher"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8ee5873ec9cce0195efcb7a4e9507a04cd49aec9c83d0389df45b1ef7ba2e649"
 
 [[package]]
 name = "syn"
