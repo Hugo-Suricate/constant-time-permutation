@@ -8,7 +8,7 @@ fn round_keys(seed: [u8; 32], rounds: usize) -> Vec<((u64, u64), (u64, u64))> {
         u64::from_le_bytes(seed[0..8].try_into().unwrap()),
         u64::from_le_bytes(seed[8..16].try_into().unwrap()),
     );
-    (0..(2 * rounds))
+    (0..rounds)
         .map(|i| {
             let mut h = SipHasher13::new_with_keys(
                 u64::from_le_bytes(seed[16..24].try_into().unwrap()),
@@ -62,6 +62,23 @@ where
     let keys = round_keys(s.into(), r);
     let p: T = T::try_from(n.into().isqrt()).unwrap();
     keys.into_iter().rev().fold(x, |acc, k| feistel_round_inv(n, p, acc, k))
+}
+
+pub fn permute_batch<T, U>(n: T, x: &[T], s: U, r: usize) -> Vec<T>
+where 
+    T: Copy + PartialOrd
+    + std::ops::Add<Output = T> + std::ops::Sub<Output = T> + std::ops::Mul<Output = T> 
+    + std::ops::Rem<Output = T> + std::ops::Div<Output = T>
+    + Into<u64> + TryFrom<u64>,
+    <T as TryFrom<u64>>::Error: std::fmt::Debug,
+    U: Into<[u8; 32]>,
+{
+    assert!(n.into() > 0, "n must be positive.");
+    let keys = round_keys(s.into(), r);
+    let p: T = T::try_from(n.into().isqrt()).unwrap();
+    keys.into_iter().fold(x.to_vec(), |acc, k| {
+        acc.iter().map(|&xx| feistel_round_fwd(n, p, xx, k)).collect()
+    })
 }
 
 fn feistel_round_fwd<T>(n: T, p: T, x: T, keys: ((u64, u64), (u64, u64))) -> T
