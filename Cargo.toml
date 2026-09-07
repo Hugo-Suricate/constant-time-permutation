@@ -1,0 +1,7 @@
+[package]
+name = "constant-time-permutation"
+version = "1.0.0"
+edition = "2024"
+
+[dependencies]
+rand = "0.9.1"
