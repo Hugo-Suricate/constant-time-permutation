@@ -1,28 +1,30 @@
-use siphasher::sip::SipHasher13;
+use siphasher::sip128::{Hasher128, SipHasher13};
 use std::hash::Hasher;
 
-/// Derives 2r independent round keys from the 32-byte seed,
+/// Derives 4r independent round keys from the 32-byte seed,
 /// with domain separation per key index.
 fn round_keys(seed: [u8; 32], rounds: usize) -> Vec<((u64, u64), (u64, u64))> {
-    let master = SipHasher13::new_with_keys(
+    let master_key = (
         u64::from_le_bytes(seed[0..8].try_into().unwrap()),
         u64::from_le_bytes(seed[8..16].try_into().unwrap()),
     );
+    let secondary_key = (
+        u64::from_le_bytes(seed[0..8].try_into().unwrap()),
+        u64::from_le_bytes(seed[8..16].try_into().unwrap()),
+    );
+
     (0..rounds)
         .map(|i| {
-            let mut h = SipHasher13::new_with_keys(
-                u64::from_le_bytes(seed[16..24].try_into().unwrap()),
-                u64::from_le_bytes(seed[24..32].try_into().unwrap()),
-            );
-            h.write_u64(master.finish() ^ 0x9E3779B97F4A7C15u64.wrapping_mul(i as u64 + 1));
-            let a = h.finish();
-            h.write_u8(0xFF); // domain-separate
-            let b = h.finish();
-            h.write_u8(0xFF);
-            let c = h.finish();
-            h.write_u8(0xFF);
-            let d = h.finish();
-            ((a, b), (c, d))
+            let pair = |counter: u64| -> (u64, u64) {
+                let mut h = SipHasher13::new_with_keys(master_key.0 ^ counter, master_key.1);
+                h.write_u64(secondary_key.0);
+                h.write_u64(secondary_key.1);
+                h.write_u64(counter); // domain separation between the two halves
+                return h.finish128().as_u64()
+            };
+            let k0 = pair(2 * i as u64);
+            let k1 = pair(2 * i as u64 + 1);
+            (k0, k1)
         })
         .collect()
 }
@@ -114,7 +116,6 @@ where
     if x < n - p2 {
         return x + p2;
     } else {
-        // came from core: x = p*y2 + y1 + r  (where r = n - p2)
         let off: u64 = (x - (n - p2)).into();
         let p64: u64 = p.into();
         let y1 = off / p64;
@@ -125,13 +126,56 @@ where
     }
 }
 
+pub struct Permuter<T> 
+{
+    pub n: T,
+    pub r: usize,
+    p: T,
+    keys: Vec<((u64, u64), (u64, u64))>
+}
+
+impl<T> Permuter<T> 
+where 
+    T: Copy + PartialOrd 
+    + std::ops::Add<Output = T> + std::ops::Sub<Output = T> + std::ops::Mul<Output = T> 
+    + std::ops::Rem<Output = T> + std::ops::Div<Output = T>
+    + Into<u64> + TryFrom<u64>,
+    <T as TryFrom<u64>>::Error: std::fmt::Debug,
+{
+    pub fn new<U>(n: T, s: U, r: usize) -> Self
+    where 
+        U: Into<[u8; 32]>,
+    {
+        assert!(n.into() > 0, "n must be positive.");
+        Permuter { 
+            n: n, 
+            r: r, 
+            p: T::try_from(n.into().isqrt()).unwrap(),
+            keys: round_keys(s.into(), r)
+        }
+    }
+
+    pub fn permute(&self, x: T) -> T
+    {
+        return self.keys.iter().fold(x, |acc, &k| feistel_round_fwd(self.n, self.p, acc, k));
+    }
+
+    pub fn unpermute(&self, x: T) -> T
+    {
+        return self.keys.iter().rev().fold(x, |acc, &k| feistel_round_inv(self.n, self.p, acc, k));
+    }
+}
+
 #[test]
 fn roundtrip() {
     let n: u32 = 1000; // p = 31, r = 1000 - 961 = 39
+    let permut = Permuter::new(n, [113u8; 32], 8);
     for x in 0..n {
         assert_eq!(
             unpermute(n, permute(n, x, [7u8; 32], 8), [7u8; 32], 8),
             x
         );
+
+        assert_eq!(permut.unpermute(permut.permute(x)), x);
     }
 }
